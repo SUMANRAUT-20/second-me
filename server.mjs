@@ -61,6 +61,34 @@ async function cleanProduct(product) {
     .trim();
   return JSON.parse(text);
 }
+async function parseMission(missionText) {
+  const res = await fetch("https://api.meta.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "muse-spark-1.3",
+      messages: [
+        {
+          role: "system",
+          content:
+            'You are Second Me, an AI night-shift worker. The shop owner writes tonight\'s mission in their own words (English or Roman Nepali). Understand it and reply ONLY with JSON like {"focus": string, "maxProducts": number, "maxPrice": number or null, "startTime": string, "tasks": [string], "summary": string}. tasks = 3 to 5 short action steps for tonight. summary = one friendly sentence in English confirming what you will do.',
+        },
+        {
+          role: "user",
+          content: `Tonight's mission: ${missionText}`,
+        },
+      ],
+    }),
+  });
+  const data = await res.json();
+  const text = data.choices[0].message.content
+    .replace(/```json|```/g, "")
+    .trim();
+  return JSON.parse(text);
+}
 const sampleProduct = {
   name: "Okinawa Brown Sugar Coffee Beans 200g",
   cost: 1200,
@@ -120,7 +148,21 @@ const server = createServer(async (req, res) => {
     });
     return;
   }
-
+  if (req.url === "/api/mission" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body);
+        const plan = await parseMission(parsed.mission);
+        res.end(JSON.stringify({ ok: true, plan }));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      }
+    });
+    return;
+  }
   res.statusCode = 404;
   res.end(JSON.stringify({ ok: false, error: "not found" }));
 });

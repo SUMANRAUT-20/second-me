@@ -201,6 +201,33 @@ function App() {
     }
     setCleaningId(null);
   }
+  const [missionText, setMissionText] = useState(
+    "Tonight, focus on coffee products only. Make up to 5 drafts, keep prices under ¥3,000, start at 23:00.",
+  );
+  const [missionPlan, setMissionPlan] = useState(null);
+  const [missionLoading, setMissionLoading] = useState(false);
+  const [missionError, setMissionError] = useState("");
+
+  async function understandMission() {
+    setMissionLoading(true);
+    setMissionError("");
+    setMissionPlan(null);
+    try {
+      const res = await fetch("http://localhost:8787/api/mission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mission: missionText }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "AI error");
+      setMissionPlan(data.plan);
+    } catch (e) {
+      setMissionError(
+        'Could not reach the AI server. Is "node server.mjs" running?',
+      );
+    }
+    setMissionLoading(false);
+  }
   const reportReady = visibleLogs >= nightLogs.length;
   const approvedProfit = queue
     .filter((i) => i.status === "approved")
@@ -467,6 +494,49 @@ function App() {
             );
           })}
         </div>
+      </section>
+      <section className="card">
+        <h2>🌙 Mission Check</h2>
+        <p className="dim">
+          Write tonight's mission in your own words — English or Roman Nepali.
+          Second Me reads it and shows its plan before the shift starts.
+        </p>
+        <textarea
+          className="mission-input"
+          rows={3}
+          value={missionText}
+          onChange={(e) => setMissionText(e.target.value)}
+        />
+        <div>
+          <button
+            className="primary"
+            onClick={understandMission}
+            disabled={missionLoading}
+          >
+            {missionLoading ? "Reading..." : "🤖 Understand My Mission"}
+          </button>
+        </div>
+        {missionError && <p className="ai-error">{missionError}</p>}
+        {missionPlan && (
+          <div className="clean-result">
+            <p>
+              ✅ <strong>AI understood (LIVE):</strong> {missionPlan.summary}
+            </p>
+            <p className="dim">
+              Focus: {missionPlan.focus} · Max drafts: {missionPlan.maxProducts}{" "}
+              · Price cap:{" "}
+              {missionPlan.maxPrice
+                ? `¥${missionPlan.maxPrice.toLocaleString()}`
+                : "none"}{" "}
+              · Starts: {missionPlan.startTime}
+            </p>
+            <ul className="task-list">
+              {missionPlan.tasks.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
       <section className="card queue">
         <h2>👑 CEO Approval Queue</h2>

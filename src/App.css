@@ -370,3 +370,18 @@ h3 {
   padding: 8px 10px;
   font-size: 13px;
 }
+.mission-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+  margin: 8px 0 10px;
+  background: #fff;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.task-list {
+  margin: 6px 0 0 18px;
+  font-size: 14px;
+}
