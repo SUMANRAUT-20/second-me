@@ -285,3 +285,26 @@ h3 {
     font-size: 24px;
   }
 }
+.ai-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.ai-form input {
+  flex: 1;
+  min-width: 150px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+  background: #fff;
+}
+.ai-form button {
+  white-space: nowrap;
+}
+.ai-error {
+  color: #b91c1c;
+  font-weight: 600;
+  margin-top: 10px;
+}

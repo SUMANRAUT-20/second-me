@@ -119,7 +119,48 @@ function App() {
     const t = setTimeout(() => setVisibleLogs((v) => v + 1), 850);
     return () => clearTimeout(t);
   }, [running, visibleLogs]);
+  const [aiForm, setAiForm] = useState({
+    name: "Okinawa Brown Sugar Coffee Beans 200g",
+    cost: 1200,
+    competitor: "2700-3200 yen",
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
 
+  async function generateDraft() {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const res = await fetch("http://localhost:8787/api/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aiForm),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "AI error");
+      setQueue((q) => [
+        {
+          id: Date.now(),
+          type: "listing",
+          emoji: "🤖",
+          name: data.draft.title,
+          supplier: "Live AI Draft",
+          platform: "Shopify",
+          price: data.draft.price,
+          profit: data.draft.price - Number(aiForm.cost),
+          competitor: aiForm.competitor,
+          signal: "LIVE",
+          reason: data.draft.reason,
+        },
+        ...q,
+      ]);
+    } catch (e) {
+      setAiError(
+        'Could not reach the AI server. Is "node server.mjs" running?',
+      );
+    }
+    setAiLoading(false);
+  }
   const reportReady = visibleLogs >= nightLogs.length;
   const approvedProfit = queue
     .filter((i) => i.status === "approved")
@@ -269,7 +310,41 @@ function App() {
           </div>
         </div>
       </section>
-
+      <section className="card">
+        <h2>🤖 Live AI Draft</h2>
+        <p className="dim">
+          Real Muse Spark, right now — type a product and let Second Me draft
+          it. The draft lands at the top of your Approval Queue.
+        </p>
+        <div className="ai-form">
+          <input
+            value={aiForm.name}
+            onChange={(e) => setAiForm({ ...aiForm, name: e.target.value })}
+            placeholder="Product name"
+          />
+          <input
+            type="number"
+            value={aiForm.cost}
+            onChange={(e) => setAiForm({ ...aiForm, cost: e.target.value })}
+            placeholder="Cost (yen)"
+          />
+          <input
+            value={aiForm.competitor}
+            onChange={(e) =>
+              setAiForm({ ...aiForm, competitor: e.target.value })
+            }
+            placeholder="Competitor prices"
+          />
+          <button
+            className="primary"
+            onClick={generateDraft}
+            disabled={aiLoading}
+          >
+            {aiLoading ? "Thinking..." : "✨ Generate Draft"}
+          </button>
+        </div>
+        {aiError && <p className="ai-error">{aiError}</p>}
+      </section>
       <section className="card queue">
         <h2>👑 CEO Approval Queue</h2>
         {queue.map((item) => (
