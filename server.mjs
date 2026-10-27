@@ -33,7 +33,34 @@ async function draftListing(product) {
     .trim();
   return JSON.parse(text);
 }
-
+async function cleanProduct(product) {
+  const res = await fetch("https://api.meta.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "muse-spark-1.3",
+      messages: [
+        {
+          role: "system",
+          content:
+            'You clean messy supplier product data for a small online shop. Reply ONLY with JSON like {"cleanName": string, "cost": number or null, "category": string, "descriptionEn": string, "issues": [string], "action": string}. descriptionEn must be clean English, one sentence. In issues, list each data problem you found (missing price, price written as text, mixed languages, possible duplicate, out of stock). action is "ready" if the product can be listed after cleaning, or "ask-supplier" if the owner must confirm something first (for example a missing price).',
+        },
+        {
+          role: "user",
+          content: `Clean this supplier product record: ${JSON.stringify(product)}`,
+        },
+      ],
+    }),
+  });
+  const data = await res.json();
+  const text = data.choices[0].message.content
+    .replace(/```json|```/g, "")
+    .trim();
+  return JSON.parse(text);
+}
 const sampleProduct = {
   name: "Okinawa Brown Sugar Coffee Beans 200g",
   cost: 1200,
@@ -71,6 +98,21 @@ const server = createServer(async (req, res) => {
         const product = JSON.parse(body);
         const draft = await draftListing(product);
         res.end(JSON.stringify({ ok: true, draft }));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      }
+    });
+    return;
+  }
+  if (req.url === "/api/clean" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const product = JSON.parse(body);
+        const cleaned = await cleanProduct(product);
+        res.end(JSON.stringify({ ok: true, cleaned }));
       } catch (e) {
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false, error: String(e) }));

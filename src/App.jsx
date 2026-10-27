@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import "./App.css";
+import supplierData from "./suppliers.json";
 
 const nightLogs = [
   {
@@ -160,6 +161,45 @@ function App() {
       );
     }
     setAiLoading(false);
+  }
+  const supplierName = (id) =>
+    supplierData.suppliers.find((s) => s.id === id)?.name || id;
+  const flagFor = (p) => {
+    const flags = [];
+    if (p.cost === null || p.cost === undefined)
+      flags.push("⚠️ No price — ask the supplier");
+    if (typeof p.cost === "string")
+      flags.push("⚠️ Price is text, not a number");
+    if (p.stock === 0) flags.push("⚠️ Out of stock");
+    if ((p.description || "").toLowerCase().includes("duplicate"))
+      flags.push("⚠️ Possible duplicate listing");
+    if (/[^\x00-\x7F]/.test(p.name + " " + (p.description || "")))
+      flags.push("⚠️ Mixed-language text");
+    return flags;
+  };
+  const [cleanResults, setCleanResults] = useState({});
+  const [cleaningId, setCleaningId] = useState(null);
+
+  async function cleanWithAI(product) {
+    setCleaningId(product.id);
+    try {
+      const res = await fetch("http://localhost:8787/api/clean", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(product),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "AI error");
+      setCleanResults((prev) => ({ ...prev, [product.id]: data.cleaned }));
+    } catch (e) {
+      setCleanResults((prev) => ({
+        ...prev,
+        [product.id]: {
+          error: 'Could not reach the AI server. Is "node server.mjs" running?',
+        },
+      }));
+    }
+    setCleaningId(null);
   }
   const reportReady = visibleLogs >= nightLogs.length;
   const approvedProfit = queue
@@ -344,6 +384,89 @@ function App() {
           </button>
         </div>
         {aiError && <p className="ai-error">{aiError}</p>}
+      </section>
+      <section className="card">
+        <h2>📋 Master Product List</h2>
+        <p className="dim">
+          One clean list from every supplier. Messy data gets flagged — the
+          system never breaks. Data: SAMPLE
+        </p>
+        <div className="supplier-row">
+          {supplierData.suppliers.map((s) => (
+            <div key={s.id} className="supplier-chip">
+              <strong>{s.name}</strong> · {s.country} · ⭐ {s.rating} ·{" "}
+              {s.yearsInBusiness} yrs · {s.ordersCompleted.toLocaleString()}{" "}
+              orders{s.verified ? " · ✅ Verified" : " · ❌ Not verified"}
+            </div>
+          ))}
+        </div>
+        <div className="product-grid">
+          {supplierData.products.map((p) => {
+            const flags = flagFor(p);
+            const costNum =
+              p.cost === null || p.cost === undefined
+                ? null
+                : Number(String(p.cost).replace(/,/g, ""));
+            return (
+              <div key={p.id} className="product-card">
+                <div className="product-top">
+                  <strong>{p.name}</strong>
+                  <span className="badge sample">SAMPLE</span>
+                </div>
+                <p className="dim">
+                  {supplierName(p.supplierId)} · {p.category}
+                </p>
+                <p className="meta">
+                  Cost:{" "}
+                  <strong>
+                    {costNum === null ? "—" : `¥${costNum.toLocaleString()}`}
+                  </strong>{" "}
+                  · Stock: {p.stock} · Ships: {p.shipDays} days · MOQ: {p.moq}
+                </p>
+                {flags.map((f) => (
+                  <p key={f} className="flag">
+                    {f}
+                  </p>
+                ))}
+                {flags.length > 0 && !cleanResults[p.id] && (
+                  <button
+                    className="clean-btn"
+                    onClick={() => cleanWithAI(p)}
+                    disabled={cleaningId === p.id}
+                  >
+                    {cleaningId === p.id ? "Cleaning..." : "🧹 Clean with AI"}
+                  </button>
+                )}
+                {cleanResults[p.id] && !cleanResults[p.id].error && (
+                  <div className="clean-result">
+                    <p>
+                      ✅ <strong>AI cleaned (LIVE):</strong>{" "}
+                      {cleanResults[p.id].cleanName} —{" "}
+                      {cleanResults[p.id].cost === null
+                        ? "price still missing"
+                        : `¥${cleanResults[p.id].cost.toLocaleString()}`}
+                    </p>
+                    <p className="dim">{cleanResults[p.id].descriptionEn}</p>
+                    <p className="dim">
+                      Issues found:{" "}
+                      {cleanResults[p.id].issues.join(" · ") || "none"}
+                    </p>
+                    <p>
+                      <strong>
+                        {cleanResults[p.id].action === "ready"
+                          ? "🟢 Ready to list"
+                          : "🟡 Ask the supplier first"}
+                      </strong>
+                    </p>
+                  </div>
+                )}
+                {cleanResults[p.id]?.error && (
+                  <p className="ai-error">{cleanResults[p.id].error}</p>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </section>
       <section className="card queue">
         <h2>👑 CEO Approval Queue</h2>

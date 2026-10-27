@@ -1,0 +1,163 @@
+{
+  "note": "SAMPLE data - 12 products. Supplier A clean, Supplier B messy on purpose. Coffee comes from BOTH suppliers.",
+  "suppliers": [
+    {
+      "id": "sup-a",
+      "name": "Hokkaido Craft Supply",
+      "country": "Japan",
+      "rating": 4.8,
+      "yearsInBusiness": 8,
+      "ordersCompleted": 3200,
+      "responseHours": 3,
+      "verified": true,
+      "returns": "30-day returns accepted",
+      "dataQuality": "clean"
+    },
+    {
+      "id": "sup-b",
+      "name": "Kathmandu Handicraft Export",
+      "country": "Nepal",
+      "rating": 4.2,
+      "yearsInBusiness": 3,
+      "ordersCompleted": 410,
+      "responseHours": 26,
+      "verified": false,
+      "returns": "Not specified",
+      "dataQuality": "messy"
+    }
+  ],
+  "products": [
+    {
+      "id": "p1",
+      "supplierId": "sup-a",
+      "name": "Okinawa Brown Sugar Coffee Beans 200g",
+      "cost": 1200,
+      "stock": 150,
+      "moq": 10,
+      "shipDays": "2-4",
+      "category": "Food & Drink",
+      "description": "Slow-roasted coffee beans with Okinawa kokuto brown sugar. Deep caramel aroma."
+    },
+    {
+      "id": "p2",
+      "supplierId": "sup-a",
+      "name": "Handmade Bamboo Table Lamp",
+      "cost": 3060,
+      "stock": 40,
+      "moq": 5,
+      "shipDays": "3-5",
+      "category": "Home & Living",
+      "description": "Hand-woven bamboo shade, warm LED bulb included. Natural cafe style."
+    },
+    {
+      "id": "p3",
+      "supplierId": "sup-a",
+      "name": "Uji Matcha Powder 100g",
+      "cost": 1450,
+      "stock": 200,
+      "moq": 10,
+      "shipDays": "2-3",
+      "category": "Food & Drink",
+      "description": "Ceremonial grade matcha from Uji, Kyoto. Stone-ground, vivid green."
+    },
+    {
+      "id": "p4",
+      "supplierId": "sup-a",
+      "name": "Ceramic Yunomi Tea Cup (Set of 2)",
+      "cost": 980,
+      "stock": 85,
+      "moq": 12,
+      "shipDays": "2-4",
+      "category": "Kitchen",
+      "description": "Hand-glazed ceramic tea cups, each pattern slightly unique."
+    },
+    {
+      "id": "p12",
+      "supplierId": "sup-a",
+      "name": "Okinawa Shikuwasa Juice 720ml",
+      "cost": 860,
+      "stock": 120,
+      "moq": 12,
+      "shipDays": "2-3",
+      "category": "Food & Drink",
+      "description": "Refreshing citrus juice made from Okinawa shikuwasa fruit. Popular summer drink, growing search interest."
+    },
+    {
+      "id": "p5",
+      "supplierId": "sup-b",
+      "name": "Nepali Dhaka Tote Bag",
+      "cost": 2140,
+      "stock": 60,
+      "moq": 5,
+      "shipDays": "7-12",
+      "category": "Fashion",
+      "description": "Handwoven Dhaka fabric tote, traditional Nepali pattern, strong handles."
+    },
+    {
+      "id": "p6",
+      "supplierId": "sup-b",
+      "name": "Singing Bowl (हस्तनिर्मित)",
+      "cost": null,
+      "stock": 25,
+      "moq": 3,
+      "shipDays": "10-15",
+      "category": "Wellness",
+      "description": "हातले बनाएको singing bowl, very good sound, meditation ko lagi best. Price: ask."
+    },
+    {
+      "id": "p7",
+      "supplierId": "sup-b",
+      "name": "Pashmina Scarf 100% pure",
+      "cost": "2,400",
+      "stock": 0,
+      "moq": 5,
+      "shipDays": "7-10",
+      "category": "Fashion",
+      "description": "Pure pashmina, soft and warm. Many colors available."
+    },
+    {
+      "id": "p8",
+      "supplierId": "sup-b",
+      "name": "Felt Ball Coaster Set (6 pcs)",
+      "cost": 620,
+      "stock": 300,
+      "moq": 20,
+      "shipDays": "7-12",
+      "category": "Home & Living",
+      "description": "Colorful handmade felt coasters from Kathmandu."
+    },
+    {
+      "id": "p9",
+      "supplierId": "sup-b",
+      "name": "Felt Coaster Set 6pcs handmade",
+      "cost": 640,
+      "stock": 280,
+      "moq": 20,
+      "shipDays": "7-12",
+      "category": "Home & Living",
+      "description": "Same as felt ball coaster set - duplicate listing from supplier."
+    },
+    {
+      "id": "p10",
+      "supplierId": "sup-b",
+      "name": "Hemp Backpack (Natural)",
+      "cost": 2890,
+      "stock": 45,
+      "moq": 5,
+      "shipDays": "10-14",
+      "category": "Fashion",
+      "description": "Natural hemp backpack, handmade in Nepal, laptop sleeve inside."
+    },
+    {
+      "id": "p11",
+      "supplierId": "sup-b",
+      "name": "Coffee Beans Okinawa 200g (wholesale)",
+      "cost": 1050,
+      "stock": 30,
+      "moq": 20,
+      "shipDays": "10-15",
+      "category": "Food & Drink",
+      "description": "Same coffee beans bulk pack. सस्तो तर delivery ढिलो हुन्छ, packaging simple."
+    }
+  ]
+}
