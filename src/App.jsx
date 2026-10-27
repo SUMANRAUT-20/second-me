@@ -228,6 +228,30 @@ function App() {
     }
     setMissionLoading(false);
   }
+  const [scoreResult, setScoreResult] = useState(null);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [scoreError, setScoreError] = useState("");
+
+  async function scoreSuppliers() {
+    setScoreLoading(true);
+    setScoreError("");
+    setScoreResult(null);
+    try {
+      const res = await fetch("http://localhost:8787/api/supplier-score", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ suppliers: supplierData.suppliers }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "AI error");
+      setScoreResult(data.result);
+    } catch (e) {
+      setScoreError(
+        'Could not reach the AI server. Is "node server.mjs" running?',
+      );
+    }
+    setScoreLoading(false);
+  }
   const reportReady = visibleLogs >= nightLogs.length;
   const approvedProfit = queue
     .filter((i) => i.status === "approved")
@@ -494,6 +518,43 @@ function App() {
             );
           })}
         </div>
+      </section>
+      <section className="card">
+        <h2>🏆 Supplier Score</h2>
+        <p className="dim">
+          Second Me compares your suppliers — trust score, strengths, risks —
+          and picks the better coffee deal. Supplier data: SAMPLE · AI scoring:
+          LIVE.
+        </p>
+        <button
+          className="primary"
+          onClick={scoreSuppliers}
+          disabled={scoreLoading}
+        >
+          {scoreLoading ? "Scoring..." : "🤖 Score My Suppliers"}
+        </button>
+        {scoreError && <p className="ai-error">{scoreError}</p>}
+        {scoreResult && (
+          <div>
+            {scoreResult.scores.map((s) => (
+              <div className="clean-result score-box" key={s.supplier}>
+                <p>
+                  <strong>{s.supplier}</strong> — Trust score:{" "}
+                  <strong>{s.score}/100</strong>
+                </p>
+                <p className="dim">✅ {s.strengths.join(" · ")}</p>
+                <p className="dim">⚠️ {s.risks.join(" · ")}</p>
+              </div>
+            ))}
+            <div className="clean-result score-box">
+              <p>
+                ☕ <strong>Coffee pick: {scoreResult.coffeeWinner}</strong> —{" "}
+                {scoreResult.coffeeReason}
+              </p>
+              <p className="dim">🤖 {scoreResult.recommendation}</p>
+            </div>
+          </div>
+        )}
       </section>
       <section className="card">
         <h2>🌙 Mission Check</h2>

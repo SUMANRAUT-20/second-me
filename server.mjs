@@ -89,6 +89,34 @@ async function parseMission(missionText) {
     .trim();
   return JSON.parse(text);
 }
+async function scoreSuppliers(suppliers) {
+  const res = await fetch("https://api.meta.ai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer " + key,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "muse-spark-1.3",
+      messages: [
+        {
+          role: "system",
+          content:
+            'You are Second Me, an AI night-shift worker. Compare the suppliers in the JSON the owner sends. Judge each on price, rating, years in business, order count, shipping speed, verification, returns policy and data quality. Reply ONLY with JSON like {"scores": [{"supplier": string, "score": number, "strengths": [string], "risks": [string]}], "coffeeWinner": string, "coffeeReason": string, "recommendation": string}. score = trust score from 0 to 100. strengths and risks = 2 to 3 short points each. Both suppliers sell a similar coffee product — coffeeWinner = the supplier name whose coffee offer is better overall, coffeeReason = one sentence why. recommendation = 1-2 sentences with your advice; remind the owner the final decision is theirs.',
+        },
+        {
+          role: "user",
+          content: `Here are my suppliers: ${JSON.stringify(suppliers)}`,
+        },
+      ],
+    }),
+  });
+  const data = await res.json();
+  const text = data.choices[0].message.content
+    .replace(/```json|```/g, "")
+    .trim();
+  return JSON.parse(text);
+}
 const sampleProduct = {
   name: "Okinawa Brown Sugar Coffee Beans 200g",
   cost: 1200,
@@ -156,6 +184,21 @@ const server = createServer(async (req, res) => {
         const parsed = JSON.parse(body);
         const plan = await parseMission(parsed.mission);
         res.end(JSON.stringify({ ok: true, plan }));
+      } catch (e) {
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: String(e) }));
+      }
+    });
+    return;
+  }
+  if (req.url === "/api/supplier-score" && req.method === "POST") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
+      try {
+        const parsed = JSON.parse(body);
+        const result = await scoreSuppliers(parsed.suppliers);
+        res.end(JSON.stringify({ ok: true, result }));
       } catch (e) {
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false, error: String(e) }));
