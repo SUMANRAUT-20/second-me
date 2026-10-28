@@ -388,3 +388,59 @@ h3 {
 .score-box {
   margin-top: 10px;
 }
+
+.flow-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.flow-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 150px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.flow-step strong {
+  font-size: 14px;
+}
+.flow-step p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.4;
+}
+.flow-num {
+  background: #2563eb;
+  color: #fff;
+  font-weight: 800;
+  font-size: 15px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.flow-arrow {
+  align-self: center;
+  color: #94a3b8;
+  font-size: 22px;
+  font-weight: 800;
+}
+.cost-total {
+  font-size: 26px;
+  font-weight: 800;
+  color: #2563eb;
+  margin: 6px 0 10px;
+}
+.cost-total .dim {
+  font-size: 14px;
+  font-weight: 600;
+}

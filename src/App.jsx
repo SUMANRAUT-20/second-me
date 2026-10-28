@@ -127,6 +127,12 @@ function App() {
   });
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [aiActions, setAiActions] = useState({
+    draft: 0,
+    clean: 0,
+    mission: 0,
+    score: 0,
+  });
 
   async function generateDraft() {
     setAiLoading(true);
@@ -155,6 +161,7 @@ function App() {
         },
         ...q,
       ]);
+      setAiActions((a) => ({ ...a, draft: a.draft + 1 }));
     } catch (e) {
       setAiError(
         'Could not reach the AI server. Is "node server.mjs" running?',
@@ -191,6 +198,7 @@ function App() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "AI error");
       setCleanResults((prev) => ({ ...prev, [product.id]: data.cleaned }));
+      setAiActions((a) => ({ ...a, clean: a.clean + 1 }));
     } catch (e) {
       setCleanResults((prev) => ({
         ...prev,
@@ -221,6 +229,7 @@ function App() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "AI error");
       setMissionPlan(data.plan);
+      setAiActions((a) => ({ ...a, mission: a.mission + 1 }));
     } catch (e) {
       setMissionError(
         'Could not reach the AI server. Is "node server.mjs" running?',
@@ -245,6 +254,7 @@ function App() {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "AI error");
       setScoreResult(data.result);
+      setAiActions((a) => ({ ...a, score: a.score + 1 }));
     } catch (e) {
       setScoreError(
         'Could not reach the AI server. Is "node server.mjs" running?',
@@ -260,6 +270,9 @@ function App() {
   const totalDraftProfit = initialQueue
     .filter((i) => i.type === "listing")
     .reduce((sum, i) => sum + i.profit, 0);
+  const aiActionCount =
+    aiActions.draft + aiActions.clean + aiActions.mission + aiActions.score;
+  const aiCostEst = aiActionCount * 5;
 
   function startShift() {
     setVisibleLogs(0);
@@ -334,110 +347,94 @@ function App() {
         </div>
       </section>
 
-      <div className="grid">
-        <section className="card console">
-          <h2>🌙 Night Shift Log</h2>
-          {visibleLogs === 0 && (
-            <p className="dim">
-              When the shift starts, the overnight work appears here line by
-              line.
-            </p>
-          )}
-          {nightLogs.slice(0, visibleLogs).map((log, idx) => (
-            <div className="log-line" key={idx}>
-              <span className="log-time">{log.time}</span>
-              <span>{log.text}</span>
-            </div>
-          ))}
-        </section>
-
-        <section className="card loan">
-          <h2>🎯 Loan Meter</h2>
-          <p className="dim">
-            Family home loan — NPR 30 lakh (≈ {formatYen(loanGoal)})
-          </p>
-          <div className="loan-amount">{formatYen(approvedProfit)}</div>
-          <div className="bar">
-            <div
-              className="bar-fill"
-              style={{
-                width: Math.max(approvedProfit > 0 ? 2 : 0, loanPercent) + "%",
-              }}
-            />
+      <section className="card flow-strip">
+        <div className="flow-step">
+          <span className="flow-num">1</span>
+          <div>
+            <strong>Give a Mission</strong>
+            <p>Tell the AI what to find</p>
           </div>
-          <p className="dim">
-            {loanPercent.toFixed(2)}% — profit from approved listings collects
-            here.
-          </p>
-          <h3>🧠 Owner Pattern</h3>
-          <ul className="patterns">
-            {patterns.map((p, idx) => (
-              <li key={idx}>{p}</li>
-            ))}
-          </ul>
-        </section>
-      </div>
-
-      <section className="card report">
-        <h2>🌅 Morning Report</h2>
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-num">
-              {visibleLogs}/{nightLogs.length}
-            </div>
-            <div className="stat-label">Overnight tasks</div>
+        </div>
+        <div className="flow-arrow">›</div>
+        <div className="flow-step">
+          <span className="flow-num">2</span>
+          <div>
+            <strong>AI Researches</strong>
+            <p>Finds products and suppliers</p>
           </div>
-          <div className="stat">
-            <div className="stat-num">{queue.length}</div>
-            <div className="stat-label">Drafts ready</div>
+        </div>
+        <div className="flow-arrow">›</div>
+        <div className="flow-step">
+          <span className="flow-num">3</span>
+          <div>
+            <strong>Prepares Drafts</strong>
+            <p>Creates listings and prices</p>
           </div>
-          <div className="stat">
-            <div className="stat-num">{formatYen(totalDraftProfit)}</div>
-            <div className="stat-label">Estimated profit</div>
+        </div>
+        <div className="flow-arrow">›</div>
+        <div className="flow-step">
+          <span className="flow-num">4</span>
+          <div>
+            <strong>You Approve</strong>
+            <p>Review and select</p>
           </div>
-          <div className="stat">
-            <div className="stat-num">~10 min</div>
-            <div className="stat-label">Owner time needed</div>
+        </div>
+        <div className="flow-arrow">›</div>
+        <div className="flow-step">
+          <span className="flow-num">5</span>
+          <div>
+            <strong>Track Results</strong>
+            <p>Sales, profit and loan progress</p>
           </div>
         </div>
       </section>
+
       <section className="card">
-        <h2>🤖 Live AI Draft</h2>
+        <h2>Step 1 · 🌙 Mission Check</h2>
         <p className="dim">
-          Real Muse Spark, right now — type a product and let Second Me draft
-          it. The draft lands at the top of your Approval Queue.
+          Write tonight's mission in your own words — English or Roman Nepali.
+          Second Me reads it and shows its plan before the shift starts.
         </p>
-        <div className="ai-form">
-          <input
-            value={aiForm.name}
-            onChange={(e) => setAiForm({ ...aiForm, name: e.target.value })}
-            placeholder="Product name"
-          />
-          <input
-            type="number"
-            value={aiForm.cost}
-            onChange={(e) => setAiForm({ ...aiForm, cost: e.target.value })}
-            placeholder="Cost (yen)"
-          />
-          <input
-            value={aiForm.competitor}
-            onChange={(e) =>
-              setAiForm({ ...aiForm, competitor: e.target.value })
-            }
-            placeholder="Competitor prices"
-          />
+        <textarea
+          className="mission-input"
+          rows={3}
+          value={missionText}
+          onChange={(e) => setMissionText(e.target.value)}
+        />
+        <div>
           <button
             className="primary"
-            onClick={generateDraft}
-            disabled={aiLoading}
+            onClick={understandMission}
+            disabled={missionLoading}
           >
-            {aiLoading ? "Thinking..." : "✨ Generate Draft"}
+            {missionLoading ? "Reading..." : "🤖 Understand My Mission"}
           </button>
         </div>
-        {aiError && <p className="ai-error">{aiError}</p>}
+        {missionError && <p className="ai-error">{missionError}</p>}
+        {missionPlan && (
+          <div className="clean-result">
+            <p>
+              ✅ <strong>AI understood (LIVE):</strong> {missionPlan.summary}
+            </p>
+            <p className="dim">
+              Focus: {missionPlan.focus} · Max drafts: {missionPlan.maxProducts}{" "}
+              · Price cap:{" "}
+              {missionPlan.maxPrice
+                ? `¥${missionPlan.maxPrice.toLocaleString()}`
+                : "none"}{" "}
+              · Starts: {missionPlan.startTime}
+            </p>
+            <ul className="task-list">
+              {missionPlan.tasks.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
+
       <section className="card">
-        <h2>📋 Master Product List</h2>
+        <h2>Step 2 · 📋 Master Product List</h2>
         <p className="dim">
           One clean list from every supplier. Messy data gets flagged — the
           system never breaks. Data: SAMPLE
@@ -519,8 +516,9 @@ function App() {
           })}
         </div>
       </section>
+
       <section className="card">
-        <h2>🏆 Supplier Score</h2>
+        <h2>Step 2 · 🏆 Supplier Score</h2>
         <p className="dim">
           Second Me compares your suppliers — trust score, strengths, risks —
           and picks the better coffee deal. Supplier data: SAMPLE · AI scoring:
@@ -556,51 +554,85 @@ function App() {
           </div>
         )}
       </section>
+
+      <section className="card console">
+        <h2>Step 3 · 🌙 Night Shift Log</h2>
+        {visibleLogs === 0 && (
+          <p className="dim">
+            When the shift starts, the overnight work appears here line by
+            line.
+          </p>
+        )}
+        {nightLogs.slice(0, visibleLogs).map((log, idx) => (
+          <div className="log-line" key={idx}>
+            <span className="log-time">{log.time}</span>
+            <span>{log.text}</span>
+          </div>
+        ))}
+      </section>
+
       <section className="card">
-        <h2>🌙 Mission Check</h2>
+        <h2>Step 3 · 🤖 Live AI Draft</h2>
         <p className="dim">
-          Write tonight's mission in your own words — English or Roman Nepali.
-          Second Me reads it and shows its plan before the shift starts.
+          Real Muse Spark, right now — type a product and let Second Me draft
+          it. The draft lands at the top of your Approval Queue.
         </p>
-        <textarea
-          className="mission-input"
-          rows={3}
-          value={missionText}
-          onChange={(e) => setMissionText(e.target.value)}
-        />
-        <div>
+        <div className="ai-form">
+          <input
+            value={aiForm.name}
+            onChange={(e) => setAiForm({ ...aiForm, name: e.target.value })}
+            placeholder="Product name"
+          />
+          <input
+            type="number"
+            value={aiForm.cost}
+            onChange={(e) => setAiForm({ ...aiForm, cost: e.target.value })}
+            placeholder="Cost (yen)"
+          />
+          <input
+            value={aiForm.competitor}
+            onChange={(e) =>
+              setAiForm({ ...aiForm, competitor: e.target.value })
+            }
+            placeholder="Competitor prices"
+          />
           <button
             className="primary"
-            onClick={understandMission}
-            disabled={missionLoading}
+            onClick={generateDraft}
+            disabled={aiLoading}
           >
-            {missionLoading ? "Reading..." : "🤖 Understand My Mission"}
+            {aiLoading ? "Thinking..." : "✨ Generate Draft"}
           </button>
         </div>
-        {missionError && <p className="ai-error">{missionError}</p>}
-        {missionPlan && (
-          <div className="clean-result">
-            <p>
-              ✅ <strong>AI understood (LIVE):</strong> {missionPlan.summary}
-            </p>
-            <p className="dim">
-              Focus: {missionPlan.focus} · Max drafts: {missionPlan.maxProducts}{" "}
-              · Price cap:{" "}
-              {missionPlan.maxPrice
-                ? `¥${missionPlan.maxPrice.toLocaleString()}`
-                : "none"}{" "}
-              · Starts: {missionPlan.startTime}
-            </p>
-            <ul className="task-list">
-              {missionPlan.tasks.map((t) => (
-                <li key={t}>{t}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {aiError && <p className="ai-error">{aiError}</p>}
       </section>
+
+      <section className="card report">
+        <h2>Step 4 · 🌅 Morning Report</h2>
+        <div className="stats">
+          <div className="stat">
+            <div className="stat-num">
+              {visibleLogs}/{nightLogs.length}
+            </div>
+            <div className="stat-label">Overnight tasks</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{queue.length}</div>
+            <div className="stat-label">Drafts ready</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{formatYen(totalDraftProfit)}</div>
+            <div className="stat-label">Estimated profit</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">~10 min</div>
+            <div className="stat-label">Owner time needed</div>
+          </div>
+        </div>
+      </section>
+
       <section className="card queue">
-        <h2>👑 CEO Approval Queue</h2>
+        <h2>Step 4 · 👑 CEO Approval Queue</h2>
         {queue.map((item) => (
           <div className="queue-item" key={item.id}>
             <div className="queue-main">
@@ -670,6 +702,63 @@ function App() {
             </div>
           </div>
         ))}
+      </section>
+
+      <section className="card">
+        <h2>🤖 AI Cost Controls</h2>
+        <p className="dim">
+          Every AI call in this session, counted live. Real per-call cost is
+          tiny (the first call used 677 tokens) — exact billing lives in the
+          Meta dashboard; figures here are honest estimates at ¥5 per AI
+          action.
+        </p>
+        <div className="cost-total">
+          {formatYen(aiCostEst)}{" "}
+          <span className="dim">/ ¥500 session budget (est.)</span>
+        </div>
+        <div className="bar">
+          <div
+            className="bar-fill"
+            style={{ width: Math.min(100, (aiCostEst / 500) * 100) + "%" }}
+          />
+        </div>
+        <p className="dim">
+          Drafts: {aiActions.draft} ({formatYen(aiActions.draft * 5)}) ·
+          Cleaning: {aiActions.clean} ({formatYen(aiActions.clean * 5)}) ·
+          Missions: {aiActions.mission} ({formatYen(aiActions.mission * 5)}) ·
+          Supplier scores: {aiActions.score} ({formatYen(aiActions.score * 5)})
+          {" "}— {aiActionCount} AI actions this session
+        </p>
+        <p className="dim">
+          Runs on the $150 hackathon credit. In the full version the shift
+          auto-stops at the budget cap.
+        </p>
+      </section>
+
+      <section className="card loan">
+        <h2>Step 5 · 🎯 Loan Meter</h2>
+        <p className="dim">
+          Family home loan — NPR 30 lakh (≈ {formatYen(loanGoal)})
+        </p>
+        <div className="loan-amount">{formatYen(approvedProfit)}</div>
+        <div className="bar">
+          <div
+            className="bar-fill"
+            style={{
+              width: Math.max(approvedProfit > 0 ? 2 : 0, loanPercent) + "%",
+            }}
+          />
+        </div>
+        <p className="dim">
+          {loanPercent.toFixed(2)}% — profit from approved listings collects
+          here.
+        </p>
+        <h3>🧠 Owner Pattern</h3>
+        <ul className="patterns">
+          {patterns.map((p, idx) => (
+            <li key={idx}>{p}</li>
+          ))}
+        </ul>
       </section>
 
       <footer className="safety">
