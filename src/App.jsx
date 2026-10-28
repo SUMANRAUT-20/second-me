@@ -1,87 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import supplierData from "./suppliers.json";
 
-const nightLogs = [
-  {
-    time: "23:12",
-    text: "Shift started — supplier data synced (Supplier A: clean data, Supplier B: messy data)",
-  },
-  {
-    time: "23:40",
-    text: 'Live Research: short-video interest in coffee is rising — many "where to buy?" comments [SAMPLE]',
-  },
-  {
-    time: "01:05",
-    text: "Competitor check: coffee prices range from ¥2,700 to ¥3,200",
-  },
-  {
-    time: "02:30",
-    text: "Listing draft ready: Okinawa Brown Sugar Coffee Beans — ¥2,480 (below competitors, still profitable)",
-  },
-  { time: "04:10", text: "Customer reply draft prepared" },
-  {
-    time: "05:50",
-    text: "Bookkeeping done — estimated profit added to the Approval Queue",
-  },
-  {
-    time: "06:45",
-    text: "Self-check: 1 product is missing stock data — flagged with a warning, no crash",
-  },
-  {
-    time: "07:00",
-    text: "Morning Report is ready — waiting for the owner to decide 🌅",
-  },
-];
-
 const initialQueue = [
-  {
-    id: 1,
-    type: "listing",
-    emoji: "☕",
-    name: "Okinawa Brown Sugar Coffee Beans",
-    supplier: "Supplier A",
-    platform: "Shopify",
-    price: 2480,
-    profit: 1240,
-    competitor: "¥2,700 – ¥3,200",
-    signal: "SAMPLE",
-    reason:
-      "Short-video interest is rising; priced below competitors while keeping ¥1,240 profit.",
-  },
-  {
-    id: 2,
-    type: "listing",
-    emoji: "👜",
-    name: "Nepali Dhaka Tote Bag",
-    supplier: "Supplier B",
-    platform: "Mercari",
-    price: 3980,
-    profit: 1840,
-    competitor: "¥4,500 – ¥5,200",
-    signal: "SAMPLE",
-    reason:
-      "More people are searching for handmade items; the supplier data was messy, so the AI cleaned it first.",
-  },
-  {
-    id: 3,
-    type: "listing",
-    emoji: "💡",
-    name: "Bamboo Desk Lamp",
-    supplier: "Supplier A",
-    platform: "Shopify",
-    price: 4580,
-    profit: 1520,
-    competitor: "¥4,990 – ¥5,600",
-    signal: "SAMPLE",
-    reason:
-      "Strong demand in desk-setup videos; priced below competitors with a healthy profit.",
-  },
   {
     id: 4,
     type: "reply",
     emoji: "💬",
-    name: "Customer Reply Draft",
+    name: "Customer Reply Draft (SAMPLE)",
     detail:
       'Customer asked: "How long does delivery take?" — Draft reply: We ship within 2–4 days and share the tracking number.',
     profit: 0,
@@ -95,14 +21,13 @@ const rejectReasons = [
   "Maybe later",
 ];
 const loanGoal = 3500000;
+const API = "http://localhost:8787";
 
 function formatYen(n) {
   return "¥" + n.toLocaleString("en-US");
 }
 
 function App() {
-  const [running, setRunning] = useState(false);
-  const [visibleLogs, setVisibleLogs] = useState(0);
   const [queue, setQueue] = useState(initialQueue);
   const [rejectingId, setRejectingId] = useState(null);
   const [patterns, setPatterns] = useState([
@@ -110,23 +35,6 @@ function App() {
     "Be careful with products priced over ¥5,000",
     "Avoid suppliers with slow shipping",
   ]);
-
-  useEffect(() => {
-    if (!running) return;
-    if (visibleLogs >= nightLogs.length) {
-      setRunning(false);
-      return;
-    }
-    const t = setTimeout(() => setVisibleLogs((v) => v + 1), 850);
-    return () => clearTimeout(t);
-  }, [running, visibleLogs]);
-  const [aiForm, setAiForm] = useState({
-    name: "Okinawa Brown Sugar Coffee Beans 200g",
-    cost: 1200,
-    competitor: "2700-3200 yen",
-  });
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
   const [aiActions, setAiActions] = useState({
     draft: 0,
     clean: 0,
@@ -134,43 +42,93 @@ function App() {
     score: 0,
   });
 
-  async function generateDraft() {
-    setAiLoading(true);
-    setAiError("");
-    try {
-      const res = await fetch("http://localhost:8787/api/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(aiForm),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "AI error");
-      setQueue((q) => [
-        {
-          id: Date.now(),
-          type: "listing",
-          emoji: "🤖",
-          name: data.draft.title,
-          supplier: "Live AI Draft",
-          platform: "Shopify",
-          price: data.draft.price,
-          profit: data.draft.price - Number(aiForm.cost),
-          competitor: aiForm.competitor,
-          signal: "LIVE",
-          reason: data.draft.reason,
-        },
-        ...q,
-      ]);
-      setAiActions((a) => ({ ...a, draft: a.draft + 1 }));
-    } catch (e) {
-      setAiError(
-        'Could not reach the AI server. Is "node server.mjs" running?',
-      );
+  // ---- Mission state ----
+  const [missionText, setMissionText] = useState(
+    "Tonight, focus on coffee products only. Make up to 5 drafts, keep prices under ¥3,000, start at 23:00.",
+  );
+  const [missionPlan, setMissionPlan] = useState(null);
+  const [missionLoading, setMissionLoading] = useState(false);
+  const [missionError, setMissionError] = useState("");
+  const [attachments, setAttachments] = useState([]);
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    const read = [];
+    for (const f of files) {
+      try {
+        const lower = f.name.toLowerCase();
+        let text = "";
+        if (lower.endsWith(".pdf")) {
+          const pdfjs = await import("pdfjs-dist");
+          const workerUrl = (
+            await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
+          ).default;
+          pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+          const buf = await f.arrayBuffer();
+          const pdf = await pdfjs.getDocument({ data: buf }).promise;
+          const pages = [];
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            pages.push(content.items.map((it) => it.str).join(" "));
+          }
+          text = pages.join("\n");
+        } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+          const XLSX = await import("xlsx");
+          const buf = await f.arrayBuffer();
+          const wb = XLSX.read(buf);
+          const parts = [];
+          for (const name of wb.SheetNames) {
+            parts.push(XLSX.utils.sheet_to_csv(wb.Sheets[name]));
+          }
+          text = parts.join("\n");
+        } else {
+          text = await f.text();
+        }
+        if (text.trim().length > 0) {
+          read.push({ name: f.name, text: text.slice(0, 4000) });
+        }
+      } catch (err) {
+        // unreadable file — skip it silently
+      }
     }
-    setAiLoading(false);
+    if (read.length > 0) {
+      setAttachments((prev) => [...prev, ...read]);
+      setMissionPlan(null);
+    }
+    e.target.value = "";
   }
+
+  // ---- Research state ----
+  const [cleanResults, setCleanResults] = useState({});
+  const [cleaningId, setCleaningId] = useState(null);
+  const [scoreResult, setScoreResult] = useState(null);
+  const [scoreLoading, setScoreLoading] = useState(false);
+  const [scoreError, setScoreError] = useState("");
+
+  // ---- Draft state ----
+  const [aiForm, setAiForm] = useState({
+    name: "Okinawa Brown Sugar Coffee Beans 200g",
+    cost: 1200,
+    competitor: "2700-3200 yen",
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  // ---- Shift (chain) state ----
+  const [workLog, setWorkLog] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [shiftDone, setShiftDone] = useState(false);
+  const stopRef = useRef(false);
+
+  const [tab, setTab] = useState("mission");
+
+  // ---- Ads state (Part 3b) ----
+  const [adDrafts, setAdDrafts] = useState({});
+
   const supplierName = (id) =>
     supplierData.suppliers.find((s) => s.id === id)?.name || id;
+
   const flagFor = (p) => {
     const flags = [];
     if (p.cost === null || p.cost === undefined)
@@ -184,21 +142,160 @@ function App() {
       flags.push("⚠️ Mixed-language text");
     return flags;
   };
-  const [cleanResults, setCleanResults] = useState({});
-  const [cleaningId, setCleaningId] = useState(null);
+
+  // ---- Shared AI calls (used by the buttons AND the automatic chain) ----
+  async function callMission() {
+    const res = await fetch(`${API}/api/mission`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mission:
+          missionText +
+          "\nOwner preferences learned from past approvals and rejections: " +
+          patterns.join("; ") +
+          attachments
+            .map((a) => `\n--- Attached file: ${a.name} ---\n${a.text}`)
+            .join(""),
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "AI error");
+    setAiActions((a) => ({ ...a, mission: a.mission + 1 }));
+    return data.plan;
+  }
+
+  async function callTrends(plan) {
+    const res = await fetch(`${API}/api/trends`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mission: missionText,
+        focus: plan.focus || "",
+        maxPrice: plan.maxPrice || null,
+        attachments: attachments
+          .map((a) => `--- Attached file: ${a.name} ---\n${a.text}`)
+          .join("\n"),
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "AI error");
+    setAiActions((a) => ({ ...a, mission: a.mission + 1 }));
+    return data.result;
+  }
+
+  async function callClean(product) {
+    const res = await fetch(`${API}/api/clean`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(product),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "AI error");
+    setAiActions((a) => ({ ...a, clean: a.clean + 1 }));
+    return data.cleaned;
+  }
+
+  async function callScore() {
+    const res = await fetch(`${API}/api/supplier-score`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ suppliers: supplierData.suppliers }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "AI error");
+    setAiActions((a) => ({ ...a, score: a.score + 1 }));
+    return data.result;
+  }
+
+  async function callDraft(form) {
+    const res = await fetch(`${API}/api/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "AI error");
+    setAiActions((a) => ({ ...a, draft: a.draft + 1 }));
+    return data.draft;
+  }
+
+  // ---- CJ Dropshipping (LIVE supplier) ----
+  const [cjQuery, setCjQuery] = useState("coffee");
+  const [cjResults, setCjResults] = useState([]);
+  const [cjLoading, setCjLoading] = useState(false);
+  const [cjError, setCjError] = useState("");
+  const USD_JPY = 155;
+
+  function cjPriceYen(p) {
+    const m = String(p.priceUsd || "").match(/\d+(\.\d+)?/);
+    return m ? Math.round(parseFloat(m[0]) * USD_JPY) : null;
+  }
+
+  async function searchCj(keyword) {
+    const res = await fetch(
+      `${API}/api/cj?keyword=${encodeURIComponent(keyword || "coffee")}`,
+    );
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "CJ error");
+    return data.products || [];
+  }
+
+  async function searchCjManual() {
+    setCjLoading(true);
+    setCjError("");
+    try {
+      const products = await searchCj(cjQuery);
+      setCjResults(products);
+    } catch (e) {
+      setCjError(
+        'Could not reach CJ. Is "node server.mjs" running with the CJ key set?',
+      );
+    }
+    setCjLoading(false);
+  }
+
+  function draftToQueueItem(draft, form) {
+    return {
+      id: Date.now() + Math.random(),
+      type: "listing",
+      emoji: "🤖",
+      name: draft.title,
+      supplier: "Live AI Draft",
+      platform: "Shopify",
+      price: draft.price,
+      profit: draft.price - Number(form.cost),
+      competitor: form.competitor,
+      signal: "LIVE",
+      reason:
+        form.product && form.product.trendWhy
+          ? `📈 Trend: ${form.product.trendWhy} — ${draft.reason}`
+          : draft.reason,
+      image:
+        form.product && form.product.image ? form.product.image : null,
+    };
+  }
+
+  // ---- Manual (inspector) handlers ----
+  async function understandMission() {
+    setMissionLoading(true);
+    setMissionError("");
+    setMissionPlan(null);
+    try {
+      const plan = await callMission();
+      setMissionPlan(plan);
+    } catch (e) {
+      setMissionError(
+        'Could not reach the AI server. Is "node server.mjs" running?',
+      );
+    }
+    setMissionLoading(false);
+  }
 
   async function cleanWithAI(product) {
     setCleaningId(product.id);
     try {
-      const res = await fetch("http://localhost:8787/api/clean", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(product),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "AI error");
-      setCleanResults((prev) => ({ ...prev, [product.id]: data.cleaned }));
-      setAiActions((a) => ({ ...a, clean: a.clean + 1 }));
+      const cleaned = await callClean(product);
+      setCleanResults((prev) => ({ ...prev, [product.id]: cleaned }));
     } catch (e) {
       setCleanResults((prev) => ({
         ...prev,
@@ -209,52 +306,14 @@ function App() {
     }
     setCleaningId(null);
   }
-  const [missionText, setMissionText] = useState(
-    "Tonight, focus on coffee products only. Make up to 5 drafts, keep prices under ¥3,000, start at 23:00.",
-  );
-  const [missionPlan, setMissionPlan] = useState(null);
-  const [missionLoading, setMissionLoading] = useState(false);
-  const [missionError, setMissionError] = useState("");
-
-  async function understandMission() {
-    setMissionLoading(true);
-    setMissionError("");
-    setMissionPlan(null);
-    try {
-      const res = await fetch("http://localhost:8787/api/mission", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mission: missionText }),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "AI error");
-      setMissionPlan(data.plan);
-      setAiActions((a) => ({ ...a, mission: a.mission + 1 }));
-    } catch (e) {
-      setMissionError(
-        'Could not reach the AI server. Is "node server.mjs" running?',
-      );
-    }
-    setMissionLoading(false);
-  }
-  const [scoreResult, setScoreResult] = useState(null);
-  const [scoreLoading, setScoreLoading] = useState(false);
-  const [scoreError, setScoreError] = useState("");
 
   async function scoreSuppliers() {
     setScoreLoading(true);
     setScoreError("");
     setScoreResult(null);
     try {
-      const res = await fetch("http://localhost:8787/api/supplier-score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ suppliers: supplierData.suppliers }),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "AI error");
-      setScoreResult(data.result);
-      setAiActions((a) => ({ ...a, score: a.score + 1 }));
+      const result = await callScore();
+      setScoreResult(result);
     } catch (e) {
       setScoreError(
         'Could not reach the AI server. Is "node server.mjs" running?',
@@ -262,27 +321,328 @@ function App() {
     }
     setScoreLoading(false);
   }
-  const reportReady = visibleLogs >= nightLogs.length;
-  const approvedProfit = queue
-    .filter((i) => i.status === "approved")
-    .reduce((sum, i) => sum + (i.profit || 0), 0);
-  const loanPercent = (approvedProfit / loanGoal) * 100;
-  const totalDraftProfit = initialQueue
-    .filter((i) => i.type === "listing")
-    .reduce((sum, i) => sum + i.profit, 0);
-  const aiActionCount =
-    aiActions.draft + aiActions.clean + aiActions.mission + aiActions.score;
-  const aiCostEst = aiActionCount * 5;
 
-  function startShift() {
-    setVisibleLogs(0);
-    setRunning(true);
+  async function generateDraft() {
+    setAiLoading(true);
+    setAiError("");
+    try {
+      const draft = await callDraft(aiForm);
+      setQueue((q) => [draftToQueueItem(draft, aiForm), ...q]);
+    } catch (e) {
+      setAiError(
+        'Could not reach the AI server. Is "node server.mjs" running?',
+      );
+    }
+    setAiLoading(false);
   }
 
-  function approve(id) {
-    setQueue((q) =>
-      q.map((i) => (i.id === id ? { ...i, status: "approved" } : i)),
+  // ---- The Night Shift chain: Start runs everything, in order ----
+  const say = (tag, text) =>
+    setWorkLog((l) => [...l, { tag, text }]);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function runShift() {
+    if (!missionPlan || running) return;
+    stopRef.current = false;
+    setRunning(true);
+    setTab("log");
+    setShiftDone(false);
+    setWorkLog([]);
+    const stopped = () => stopRef.current;
+
+    say("Mission", `Plan confirmed — ${missionPlan.summary}`);
+    await wait(400);
+
+    // Research: load the supplier data the AI will work on
+    say(
+      "Research",
+      `Loaded ${supplierData.products.length} products from ${supplierData.suppliers.length} suppliers (SAMPLE data). Checking every record…`,
     );
+    await wait(400);
+
+    // Trend research first: which products look likely to sell next?
+    // (AI analysis — based on the owner's attached research file when
+    // one is provided, otherwise on the AI's market knowledge.)
+    let trendPicks = [];
+    try {
+      const trends = await callTrends(missionPlan);
+      trendPicks = (trends.picks || []).slice(0, 3);
+      say(
+        "Research",
+        `📈 Trend research: ${trends.note || "picked tonight's product ideas."}`,
+      );
+      for (const pick of trendPicks) {
+        say(
+          "Research",
+          `📈 Pick: ${pick.product} — ${pick.why} (source: ${
+            pick.source === "attached file"
+              ? "owner's attached research file"
+              : "AI knowledge"
+          })`,
+        );
+      }
+    } catch (e) {
+      say(
+        "Research",
+        "📈 Trend research was not available — searching the supplier with the mission keyword instead.",
+      );
+    }
+    if (stopped()) {
+      say("Shift", "⏹ Stopped by the owner. Finished steps stay saved above.");
+      setRunning(false);
+      return;
+    }
+
+    // Then the supplier: search CJ (LIVE) for each trend pick.
+    // One search failing must not kill the others, and CJ allows
+    // about 1 request per second — so searches are spaced out.
+    let cjFound = [];
+    const terms =
+      trendPicks.length > 0
+        ? trendPicks.map((p) => p.term).filter(Boolean)
+        : [missionPlan.keyword || missionPlan.focus || "coffee"];
+    const seen = new Set();
+    let cjOk = 0;
+    let termNo = 0;
+    for (const term of terms.slice(0, 3)) {
+      if (stopped()) break;
+      termNo++;
+      if (termNo > 1) await wait(1200);
+      try {
+        const products = await searchCj(term);
+        cjOk++;
+        const pick = trendPicks.find((t) => t.term === term);
+        let matched = products;
+        if (pick) {
+          // A returned product only counts as this pick when its name
+          // really matches the search term — CJ search is loose (it
+          // returned coffee mugs for "pocket cup"). Unmatched products
+          // never receive the pick's trend reason.
+          const tokens = term
+            .toLowerCase()
+            .split(/[^a-z0-9]+/)
+            .filter((w) => w.length > 2);
+          matched = products.filter((p) => {
+            const name = (p.name || "").toLowerCase();
+            const hits = tokens.filter((t) => name.includes(t)).length;
+            return tokens.length <= 1 ? hits === 1 : hits >= 2;
+          });
+        }
+        say(
+          "Research",
+          `🌐 CJ Dropshipping (LIVE): "${term}" → ${products.length} real products${
+            pick ? `, ${matched.length} match the trend pick` : ""
+          }.`,
+        );
+        for (const p of matched) {
+          if (seen.has(p.id)) continue;
+          seen.add(p.id);
+          cjFound.push(
+            pick ? { ...p, trendWhy: pick.why, trendTerm: term } : p,
+          );
+        }
+      } catch (e) {
+        say(
+          "Research",
+          `🌐 CJ Dropshipping (LIVE): "${term}" search failed — continuing with the other picks.`,
+        );
+      }
+    }
+    if (cjFound.length > 0) {
+      setCjResults(cjFound);
+      setCjQuery(terms.join(", "));
+      say(
+        "Research",
+        `🌐 CJ Dropshipping (LIVE): ${cjFound.length} real products collected — shown in the Live Supplier Research section below.`,
+      );
+    } else if (cjOk === 0) {
+      say(
+        "Research",
+        "🌐 CJ live search was not available — continuing with the sample suppliers (SAMPLE).",
+      );
+    } else {
+      say(
+        "Research",
+        "🌐 CJ Dropshipping (LIVE): no products matched tonight's picks — continuing with the sample suppliers (SAMPLE).",
+      );
+    }
+    if (stopped()) {
+      say("Shift", "⏹ Stopped by the owner. Finished steps stay saved above.");
+      setRunning(false);
+      return;
+    }
+
+    // Clean every flagged product, one by one
+    const flaggedAll = supplierData.products.filter(
+      (p) => flagFor(p).length > 0,
+    );
+    const flagged = flaggedAll.slice(0, 5);
+    const cleanedMap = {};
+    say(
+      "Clean",
+      `${flaggedAll.length} products have messy data — cleaning ${flagged.length} of them tonight, the rest stay queued for the next shift.`,
+    );
+    for (const p of flagged) {
+      if (stopped()) break;
+      try {
+        const cleaned = await callClean(p);
+        cleanedMap[p.id] = cleaned;
+        setCleanResults((prev) => ({ ...prev, [p.id]: cleaned }));
+        say(
+          "Clean",
+          `✔ "${p.name}" → "${cleaned.cleanName}" — ${
+            cleaned.cost === null
+              ? "price still missing"
+              : formatYen(cleaned.cost)
+          } (${cleaned.action === "ready" ? "ready to list" : "ask the supplier first"})`,
+        );
+      } catch (e) {
+        say("Clean", `⚠️ Could not clean "${p.name}" — skipped, shift continues.`);
+      }
+    }
+    if (stopped()) {
+      say("Shift", "⏹ Stopped by the owner. Finished steps stay saved above.");
+      setRunning(false);
+      return;
+    }
+
+    // Score the suppliers
+    try {
+      const result = await callScore();
+      setScoreResult(result);
+      const top = [...result.scores].sort((a, b) => b.score - a.score)[0];
+      say(
+        "Supplier",
+        `✔ Suppliers scored — best: ${top.supplier} (${top.score}/100). Coffee pick: ${result.coffeeWinner}.`,
+      );
+    } catch (e) {
+      say("Supplier", "⚠️ Supplier scoring failed — shift continues without it.");
+    }
+    if (stopped()) {
+      say("Shift", "⏹ Stopped by the owner. Finished steps stay saved above.");
+      setRunning(false);
+      return;
+    }
+
+    // Draft listings for the best eligible products
+    const cap = missionPlan.maxPrice || Infinity;
+    const maxDrafts = Math.min(missionPlan.maxProducts || 2, 3);
+    const eligible = supplierData.products
+      .map((p) => {
+        const cleaned = cleanedMap[p.id] || cleanResults[p.id];
+        const cost =
+          cleaned && cleaned.cost !== null && cleaned.cost !== undefined
+            ? Number(cleaned.cost)
+            : p.cost === null || p.cost === undefined
+              ? null
+              : Number(String(p.cost).replace(/,/g, ""));
+        return { p, cost };
+      })
+      .filter(
+        ({ p, cost }) =>
+          cost !== null && !Number.isNaN(cost) && cost > 0 && p.stock > 0,
+      )
+      .filter(({ cost }) => cost * 1.5 <= cap)
+      .slice(0, maxDrafts);
+
+    say(
+      "Draft",
+      `Preparing up to ${maxDrafts} listing drafts from the eligible products…`,
+    );
+    let drafted = 0;
+    for (const { p, cost } of eligible) {
+      if (stopped()) break;
+      const form = {
+        name: p.name,
+        cost,
+        competitor:
+          `${Math.round((cost * 2.2) / 10) * 10}-${Math.round((cost * 2.7) / 10) * 10} yen`,
+      };
+      try {
+        const draft = await callDraft(form);
+        setQueue((q) => [draftToQueueItem(draft, form), ...q]);
+        drafted++;
+        say(
+          "Draft",
+          `✔ Draft ready: "${draft.title}" — ${formatYen(draft.price)} (in the CEO Approval queue)`,
+        );
+      } catch (e) {
+        say("Draft", `⚠️ Draft for "${p.name}" failed — skipped.`);
+      }
+    }
+
+    // Draft from the LIVE CJ products too — automatically, no clicking
+    const cjEligible = cjFound
+      .map((p) => ({ p, cost: cjPriceYen(p) }))
+      .filter(({ cost }) => cost && cost > 0)
+      .filter(({ cost }) => cost * 1.5 <= cap)
+      .slice(0, 2);
+    if (cjEligible.length > 0) {
+      say(
+        "Draft",
+        `Preparing ${cjEligible.length} drafts from LIVE CJ products…`,
+      );
+    }
+    for (const { p, cost } of cjEligible) {
+      if (stopped()) break;
+      const form = {
+        name: p.name,
+        cost,
+        competitor: `${Math.round((cost * 2.2) / 10) * 10}-${Math.round((cost * 2.7) / 10) * 10} yen`,
+        product: p,
+      };
+      try {
+        const draft = await callDraft(form);
+        setQueue((q) => [
+          { ...draftToQueueItem(draft, form), supplier: "CJ Dropshipping" },
+          ...q,
+        ]);
+        drafted++;
+        say(
+          "Draft",
+          `✔ CJ LIVE draft ready: "${draft.title}" — ${formatYen(draft.price)} (in the CEO Approval queue)`,
+        );
+      } catch (e) {
+        say("Draft", `⚠️ CJ draft for "${p.name}" failed — skipped.`);
+      }
+    }
+
+    if (stopped()) {
+      say("Shift", "⏹ Stopped by the owner. Finished steps stay saved above.");
+      setRunning(false);
+      return;
+    }
+
+    say(
+      "Done",
+      `🌅 Morning Report is ready — ${drafted} new draft${drafted === 1 ? "" : "s"} waiting in CEO Approval below. Nothing was published or spent.`,
+    );
+    setShiftDone(true);
+    setRunning(false);
+  }
+
+  function stopShift() {
+    stopRef.current = true;
+  }
+
+  // ---- Approval logic (Part 3) ----
+  function makeAd(item) {
+    return {
+      headline: `${item.name} — now on sale`,
+      copy: `${item.reason} Order today: ${formatYen(item.price)} on ${item.platform}. (Demo ad draft — nothing is posted without your approval.)`,
+      status: null,
+    };
+  }
+
+  function approve(item) {
+    setQueue((q) =>
+      q.map((i) => (i.id === item.id ? { ...i, status: "approved" } : i)),
+    );
+    if (item.type === "listing") {
+      setAdDrafts((prev) =>
+        prev[item.id] ? prev : { ...prev, [item.id]: makeAd(item) },
+      );
+    }
   }
 
   function chooseReason(item, reason) {
@@ -295,6 +655,76 @@ function App() {
     setRejectingId(null);
   }
 
+  function decideAd(id, status) {
+    setAdDrafts((prev) => ({
+      ...prev,
+      [id]: { ...prev[id], status },
+    }));
+  }
+
+  // ---- Derived numbers ----
+  const approvedProfit = queue
+    .filter((i) => i.status === "approved")
+    .reduce((sum, i) => sum + (i.profit || 0), 0);
+  const loanPercent = (approvedProfit / loanGoal) * 100;
+  const pendingCount = queue.filter((i) => !i.status).length;
+  const totalDraftProfit = queue
+    .filter((i) => i.type === "listing" && !i.status)
+    .reduce((sum, i) => sum + i.profit, 0);
+  const aiActionCount =
+    aiActions.draft + aiActions.clean + aiActions.mission + aiActions.score;
+  const aiCostEst = aiActionCount * 5;
+
+  const listingItems = queue.filter((i) => i.type === "listing");
+  const replyItems = queue.filter((i) => i.type === "reply");
+  const approvedListings = listingItems.filter((i) => i.status === "approved");
+
+  function renderActions(item) {
+    if (item.status === "approved") {
+      return (
+        <span className="done ok">
+          ✅ Approved
+          {item.type === "listing"
+            ? " — projected profit added to the Loan Meter"
+            : " — reply ready to send"}
+        </span>
+      );
+    }
+    if (item.status === "rejected") {
+      return (
+        <span className="done no">
+          ❌ Rejected — {item.reason} (saved to Owner Pattern)
+        </span>
+      );
+    }
+    if (rejectingId === item.id) {
+      return (
+        <div className="reason-chips">
+          <span className="dim">Choose a reason:</span>
+          {rejectReasons.map((r) => (
+            <button
+              key={r}
+              className="chip"
+              onClick={() => chooseReason(item, r)}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <>
+        <button className="approve" onClick={() => approve(item)}>
+          ✅ Approve
+        </button>
+        <button className="reject" onClick={() => setRejectingId(item.id)}>
+          ❌ Reject
+        </button>
+      </>
+    );
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -305,110 +735,129 @@ function App() {
         </div>
       </header>
 
-      <section className="hero card">
-        <h1>While I sleep, my dream keeps working.</h1>
-        <p>
-          Second Me is an AI night-shift worker for a micro-business: it
-          researches products, checks competitors, fixes prices and drafts
-          listings overnight — the owner only makes CEO decisions in the
-          morning.
-        </p>
-        <div className="mission">
-          <strong>Tonight&apos;s mission:</strong> “Focus only on coffee and
-          handmade items, up to 5 listings, prices under ¥5,000.”
-          <span className="mission-note">
-            {" "}
-            (written by the owner in plain words — the AI confirmed this plan)
+      <p className="tagline">While I sleep, my dream keeps working.</p>
+      <p className="why-line">
+        Why Second Me works every night: you give one mission, the AI works
+        the whole night, and you make the CEO decisions in the morning.
+      </p>
+
+      <div className="slim-bar">
+        <div className="slim-loan">
+          <span className="slim-label">🎯 Loan Meter</span>
+          <div className="bar slim">
+            <div
+              className="bar-fill"
+              style={{
+                width: Math.max(approvedProfit > 0 ? 2 : 0, loanPercent) + "%",
+              }}
+            />
+          </div>
+          <span className="slim-text">
+            {formatYen(approvedProfit)} of {formatYen(loanGoal)} ·{" "}
+            {loanPercent.toFixed(2)}% — family loan NPR 30 lakh, projected
+            from approved drafts
           </span>
         </div>
-        <div className="hero-actions">
-          {!running && !reportReady && (
-            <button className="primary" onClick={startShift}>
-              ▶ Start Night Shift
-            </button>
-          )}
-          {running && (
-            <button className="danger" onClick={() => setRunning(false)}>
-              ⏹ Stop Shift
-            </button>
-          )}
-          {reportReady && (
-            <button className="primary" onClick={startShift}>
-              ↻ Run Again
-            </button>
-          )}
-          <span className="status">
-            {running
-              ? "🌙 Night Shift is running…"
-              : reportReady
-                ? "🌅 Morning Report is ready"
-                : "Ready to start the shift"}
+        <div className="slim-cost">
+          <span className="slim-label">🤖 AI Cost</span>
+          <span className="slim-text">
+            {formatYen(aiCostEst)} / ¥500 tonight · {aiActionCount} AI actions
           </span>
         </div>
-      </section>
+      </div>
 
-      <section className="card flow-strip">
-        <div className="flow-step">
-          <span className="flow-num">1</span>
-          <div>
-            <strong>Give a Mission</strong>
-            <p>Tell the AI what to find</p>
-          </div>
-        </div>
-        <div className="flow-arrow">›</div>
-        <div className="flow-step">
-          <span className="flow-num">2</span>
-          <div>
-            <strong>AI Researches</strong>
-            <p>Finds products and suppliers</p>
-          </div>
-        </div>
-        <div className="flow-arrow">›</div>
-        <div className="flow-step">
-          <span className="flow-num">3</span>
-          <div>
-            <strong>Prepares Drafts</strong>
-            <p>Creates listings and prices</p>
-          </div>
-        </div>
-        <div className="flow-arrow">›</div>
-        <div className="flow-step">
-          <span className="flow-num">4</span>
-          <div>
-            <strong>You Approve</strong>
-            <p>Review and select</p>
-          </div>
-        </div>
-        <div className="flow-arrow">›</div>
-        <div className="flow-step">
-          <span className="flow-num">5</span>
-          <div>
-            <strong>Track Results</strong>
-            <p>Sales, profit and loan progress</p>
-          </div>
-        </div>
-      </section>
+      <div className="tabs">
+        <button
+          className={tab === "mission" ? "tab active" : "tab"}
+          onClick={() => setTab("mission")}
+        >
+          1 · 🌙 Mission
+        </button>
+        <span className="tab-arrow">›</span>
+        <button
+          className={tab === "log" ? "tab active" : "tab"}
+          onClick={() => setTab("log")}
+        >
+          2 · 📜 AI Work Log
+        </button>
+        <span className="tab-arrow">›</span>
+        <button
+          className={tab === "ceo" ? "tab active" : "tab"}
+          onClick={() => setTab("ceo")}
+        >
+          3 · 👑 CEO Approval{pendingCount > 0 ? ` (${pendingCount})` : ""}
+        </button>
+      </div>
 
+      {tab === "mission" && (
       <section className="card">
-        <h2>Step 1 · 🌙 Mission Check</h2>
-        <p className="dim">
-          Write tonight's mission in your own words — English or Roman Nepali.
-          Second Me reads it and shows its plan before the shift starts.
-        </p>
+        <h2>🌙 What should Second Me do tonight?</h2>
         <textarea
           className="mission-input"
           rows={3}
           value={missionText}
-          onChange={(e) => setMissionText(e.target.value)}
+          onChange={(e) => {
+            setMissionText(e.target.value);
+            setMissionPlan(null);
+          }}
         />
-        <div>
+        <div className="attach-row">
+          <label className="attach-btn">
+            📎 Attach a file
+            <input
+              type="file"
+              accept=".txt,.md,.csv,.pdf,.xlsx,.xls"
+              multiple
+              hidden
+              onChange={handleFiles}
+            />
+          </label>
+          <span className="dim">
+            A supplier price list, notes, or a pattern to follow — the AI
+            reads it together with your mission. (Text, PDF or Excel files)
+          </span>
+        </div>
+        {attachments.length > 0 && (
+          <div className="attach-chips">
+            {attachments.map((a, idx) => (
+              <span className="attach-chip" key={idx}>
+                📄 {a.name}
+                <button
+                  className="chip-x"
+                  onClick={() => {
+                    setAttachments((prev) =>
+                      prev.filter((_, i) => i !== idx),
+                    );
+                    setMissionPlan(null);
+                  }}
+                >
+                  ✕
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="row-actions">
           <button
             className="primary"
             onClick={understandMission}
             disabled={missionLoading}
           >
-            {missionLoading ? "Reading..." : "🤖 Understand My Mission"}
+            {missionLoading ? "Reading..." : "🤖 Check My Plan"}
           </button>
+          {!running ? (
+            <button
+              className="primary start-btn"
+              onClick={runShift}
+              disabled={!missionPlan}
+            >
+              ▶ Start Night Shift
+            </button>
+          ) : (
+            <button className="danger" onClick={stopShift}>
+              ⏹ Stop Shift
+            </button>
+          )}
         </div>
         {missionError && <p className="ai-error">{missionError}</p>}
         {missionPlan && (
@@ -422,7 +871,8 @@ function App() {
               {missionPlan.maxPrice
                 ? `¥${missionPlan.maxPrice.toLocaleString()}`
                 : "none"}{" "}
-              · Starts: {missionPlan.startTime}
+              · Starts: {missionPlan.startTime} · Your saved Owner Pattern was
+              included in this plan
             </p>
             <ul className="task-list">
               {missionPlan.tasks.map((t) => (
@@ -431,14 +881,33 @@ function App() {
             </ul>
           </div>
         )}
+        {!missionPlan && !missionError && (
+          <p className="dim">
+            Write your mission in English, Roman Nepali, or Japanese — check
+            the AI's plan first, then start the shift. Start unlocks once the
+            plan is confirmed.
+          </p>
+        )}
       </section>
+      )}
 
+      {tab === "log" && (
       <section className="card">
-        <h2>Step 2 · 📋 Master Product List</h2>
-        <p className="dim">
-          One clean list from every supplier. Messy data gets flagged — the
-          system never breaks. Data: SAMPLE
-        </p>
+        <h2>📜 What the AI did</h2>
+        {workLog.length === 0 && (
+          <p className="dim">
+            When the shift runs, every step the AI takes appears here — so
+            anything wrong can be traced.
+          </p>
+        )}
+        {workLog.map((line, idx) => (
+          <div className="log-line" key={idx}>
+            <span className="log-tag">{line.tag}</span>
+            <span>{line.text}</span>
+          </div>
+        ))}
+
+        <h3>📋 Master Product List <span className="dim">(SAMPLE data — the AI's research desk)</span></h3>
         <div className="supplier-row">
           {supplierData.suppliers.map((s) => (
             <div key={s.id} className="supplier-chip">
@@ -515,15 +984,59 @@ function App() {
             );
           })}
         </div>
-      </section>
 
-      <section className="card">
-        <h2>Step 2 · 🏆 Supplier Score</h2>
+        <h3>🌐 Live Supplier Research — CJ Dropshipping <span className="badge live">LIVE</span></h3>
         <p className="dim">
-          Second Me compares your suppliers — trust score, strengths, risks —
-          and picks the better coffee deal. Supplier data: SAMPLE · AI scoring:
-          LIVE.
+          Real products from a real supplier, fetched live through the CJ
+          API. Prices are in USD — the yen figure is an estimate ($1 ≈ ¥155).
         </p>
+        <div className="row-actions">
+          <input
+            className="cj-input"
+            value={cjQuery}
+            onChange={(e) => setCjQuery(e.target.value)}
+            placeholder="Search CJ products — e.g. coffee, lamp, bag"
+          />
+          <button
+            className="primary"
+            onClick={searchCjManual}
+            disabled={cjLoading}
+          >
+            {cjLoading ? "Searching..." : "🔍 Search LIVE"}
+          </button>
+        </div>
+        {cjError && <p className="ai-error">{cjError}</p>}
+        {cjResults.length > 0 && (
+          <div className="product-grid">
+            {cjResults.map((p) => {
+              const yen = cjPriceYen(p);
+              return (
+                <div key={p.id} className="product-card">
+                  <div className="product-top">
+                    <strong>{p.name}</strong>
+                    <span className="badge live">LIVE</span>
+                  </div>
+                  {p.image && <img className="cj-img" src={p.image} alt="" />}
+                  <p className="dim">{p.supplier} · via CJ Dropshipping</p>
+                  <p className="meta">
+                    Price: <strong>${p.priceUsd}</strong>
+                    {yen ? ` ≈ ${formatYen(yen)} (est.)` : ""} · Stock:{" "}
+                    {p.stock ?? "—"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {cjResults.length > 0 && (
+          <p className="dim">
+            No clicking needed — during the Night Shift, drafts from these
+            live products are prepared automatically and wait for you in CEO
+            Approval.
+          </p>
+        )}
+
+        <h3>🏆 Supplier Score <span className="dim">(data SAMPLE · scoring LIVE)</span></h3>
         <button
           className="primary"
           onClick={scoreSuppliers}
@@ -553,30 +1066,8 @@ function App() {
             </div>
           </div>
         )}
-      </section>
 
-      <section className="card console">
-        <h2>Step 3 · 🌙 Night Shift Log</h2>
-        {visibleLogs === 0 && (
-          <p className="dim">
-            When the shift starts, the overnight work appears here line by
-            line.
-          </p>
-        )}
-        {nightLogs.slice(0, visibleLogs).map((log, idx) => (
-          <div className="log-line" key={idx}>
-            <span className="log-time">{log.time}</span>
-            <span>{log.text}</span>
-          </div>
-        ))}
-      </section>
-
-      <section className="card">
-        <h2>Step 3 · 🤖 Live AI Draft</h2>
-        <p className="dim">
-          Real Muse Spark, right now — type a product and let Second Me draft
-          it. The draft lands at the top of your Approval Queue.
-        </p>
+        <h3>✨ Test a Draft <span className="dim">(manual — the shift also does this alone)</span></h3>
         <div className="ai-form">
           <input
             value={aiForm.name}
@@ -606,160 +1097,135 @@ function App() {
         </div>
         {aiError && <p className="ai-error">{aiError}</p>}
       </section>
+      )}
 
-      <section className="card report">
-        <h2>Step 4 · 🌅 Morning Report</h2>
-        <div className="stats">
-          <div className="stat">
-            <div className="stat-num">
-              {visibleLogs}/{nightLogs.length}
+      {tab === "ceo" && (
+      <section className="card">
+        <h2>👑 Your morning decisions</h2>
+        <p className="dim">
+          {shiftDone
+            ? "🌅 The night shift is done. "
+            : ""}
+          {pendingCount} waiting · Estimated profit in queue:{" "}
+          {formatYen(totalDraftProfit)} · About 10 minutes of your time.
+          Nothing here is published or spent — your tap decides.
+        </p>
+
+        <h3>(a) Products</h3>
+        {listingItems.length === 0 && (
+          <p className="dim">
+            No product drafts yet — they appear here after a Night Shift.
+            Give tonight's mission in Tab 1 and press Start Night Shift.
+          </p>
+        )}
+        {listingItems.map((item) => (
+          <div className="queue-item" key={item.id}>
+            <div className="queue-main">
+              {item.image && (
+                <img
+                  className="queue-img"
+                  src={item.image}
+                  alt={item.name}
+                  loading="lazy"
+                />
+              )}
+              <div className="queue-title">
+                {item.emoji} {item.name}
+              </div>
+              <div className="queue-details">
+                <span>
+                  {item.supplier} → {item.platform}
+                </span>
+                <span>
+                  Price: <strong>{formatYen(item.price)}</strong>
+                </span>
+                <span>
+                  Profit: <strong>{formatYen(item.profit)}</strong>
+                </span>
+                <span>Competitor: {item.competitor}</span>
+                <span
+                  className={
+                    "badge " + (item.signal === "LIVE" ? "live" : "sample")
+                  }
+                >
+                  {item.signal}
+                </span>
+                <p className="reason">💡 {item.reason}</p>
+              </div>
             </div>
-            <div className="stat-label">Overnight tasks</div>
+            <div className="queue-actions">{renderActions(item)}</div>
           </div>
-          <div className="stat">
-            <div className="stat-num">{queue.length}</div>
-            <div className="stat-label">Drafts ready</div>
-          </div>
-          <div className="stat">
-            <div className="stat-num">{formatYen(totalDraftProfit)}</div>
-            <div className="stat-label">Estimated profit</div>
-          </div>
-          <div className="stat">
-            <div className="stat-num">~10 min</div>
-            <div className="stat-label">Owner time needed</div>
-          </div>
-        </div>
-      </section>
+        ))}
 
-      <section className="card queue">
-        <h2>Step 4 · 👑 CEO Approval Queue</h2>
-        {queue.map((item) => (
+        <h3>(b) Ads — only for approved products</h3>
+        {approvedListings.length === 0 && (
+          <p className="dim">
+            Ad drafts are prepared for every product during the night, but
+            they only appear here after you approve the product. Rejected
+            products' ads stay hidden.
+          </p>
+        )}
+        {approvedListings.map((item) => {
+          const ad = adDrafts[item.id];
+          if (!ad) return null;
+          return (
+            <div className="queue-item" key={"ad-" + item.id}>
+              <div className="queue-main">
+                <div className="queue-title">📣 {ad.headline}</div>
+                <p className="reason">{ad.copy}</p>
+                <span className="badge sample">SAMPLE AD</span>
+              </div>
+              <div className="queue-actions">
+                {!ad.status && (
+                  <>
+                    <button
+                      className="approve"
+                      onClick={() => decideAd(item.id, "approved")}
+                    >
+                      ✅ Approve Ad
+                    </button>
+                    <button
+                      className="reject"
+                      onClick={() => decideAd(item.id, "rejected")}
+                    >
+                      ❌ Reject Ad
+                    </button>
+                  </>
+                )}
+                {ad.status === "approved" && (
+                  <span className="done ok">
+                    ✅ Ad approved — ready to post (demo: nothing is posted)
+                  </span>
+                )}
+                {ad.status === "rejected" && (
+                  <span className="done no">❌ Ad rejected</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <h3>(c) Customer replies</h3>
+        {replyItems.map((item) => (
           <div className="queue-item" key={item.id}>
             <div className="queue-main">
               <div className="queue-title">
                 {item.emoji} {item.name}
               </div>
-              {item.type === "listing" ? (
-                <div className="queue-details">
-                  <span>
-                    {item.supplier} → {item.platform}
-                  </span>
-                  <span>
-                    Price: <strong>{formatYen(item.price)}</strong>
-                  </span>
-                  <span>
-                    Profit: <strong>{formatYen(item.profit)}</strong>
-                  </span>
-                  <span>Competitor: {item.competitor}</span>
-                  <span className="badge sample">{item.signal}</span>
-                  <p className="reason">💡 {item.reason}</p>
-                </div>
-              ) : (
-                <p className="reason">{item.detail}</p>
-              )}
+              <p className="reason">{item.detail}</p>
             </div>
-            <div className="queue-actions">
-              {!item.status && rejectingId !== item.id && (
-                <>
-                  <button className="approve" onClick={() => approve(item.id)}>
-                    ✅ Approve
-                  </button>
-                  <button
-                    className="reject"
-                    onClick={() => setRejectingId(item.id)}
-                  >
-                    ❌ Reject
-                  </button>
-                </>
-              )}
-              {!item.status && rejectingId === item.id && (
-                <div className="reason-chips">
-                  <span className="dim">Choose a reason:</span>
-                  {rejectReasons.map((r) => (
-                    <button
-                      key={r}
-                      className="chip"
-                      onClick={() => chooseReason(item, r)}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {item.status === "approved" && (
-                <span className="done ok">
-                  ✅ Approved
-                  {item.type === "listing"
-                    ? " — profit added to the Loan Meter"
-                    : " — reply ready to send"}
-                </span>
-              )}
-              {item.status === "rejected" && (
-                <span className="done no">
-                  ❌ Rejected — {item.reason} (saved to Owner Pattern)
-                </span>
-              )}
-            </div>
+            <div className="queue-actions">{renderActions(item)}</div>
           </div>
         ))}
-      </section>
 
-      <section className="card">
-        <h2>🤖 AI Cost Controls</h2>
-        <p className="dim">
-          Every AI call in this session, counted live. Real per-call cost is
-          tiny (the first call used 677 tokens) — exact billing lives in the
-          Meta dashboard; figures here are honest estimates at ¥5 per AI
-          action.
-        </p>
-        <div className="cost-total">
-          {formatYen(aiCostEst)}{" "}
-          <span className="dim">/ ¥500 session budget (est.)</span>
-        </div>
-        <div className="bar">
-          <div
-            className="bar-fill"
-            style={{ width: Math.min(100, (aiCostEst / 500) * 100) + "%" }}
-          />
-        </div>
-        <p className="dim">
-          Drafts: {aiActions.draft} ({formatYen(aiActions.draft * 5)}) ·
-          Cleaning: {aiActions.clean} ({formatYen(aiActions.clean * 5)}) ·
-          Missions: {aiActions.mission} ({formatYen(aiActions.mission * 5)}) ·
-          Supplier scores: {aiActions.score} ({formatYen(aiActions.score * 5)})
-          {" "}— {aiActionCount} AI actions this session
-        </p>
-        <p className="dim">
-          Runs on the $150 hackathon credit. In the full version the shift
-          auto-stops at the budget cap.
-        </p>
-      </section>
-
-      <section className="card loan">
-        <h2>Step 5 · 🎯 Loan Meter</h2>
-        <p className="dim">
-          Family home loan — NPR 30 lakh (≈ {formatYen(loanGoal)})
-        </p>
-        <div className="loan-amount">{formatYen(approvedProfit)}</div>
-        <div className="bar">
-          <div
-            className="bar-fill"
-            style={{
-              width: Math.max(approvedProfit > 0 ? 2 : 0, loanPercent) + "%",
-            }}
-          />
-        </div>
-        <p className="dim">
-          {loanPercent.toFixed(2)}% — profit from approved listings collects
-          here.
-        </p>
-        <h3>🧠 Owner Pattern</h3>
+        <h3>🧠 Owner Pattern — what the AI has learned from you</h3>
         <ul className="patterns">
           {patterns.map((p, idx) => (
             <li key={idx}>{p}</li>
           ))}
         </ul>
       </section>
+      )}
 
       <footer className="safety">
         🔒 Demo mode: no real orders, publishing, ads, or spending — everything
