@@ -147,6 +147,7 @@ function App() {
   async function callMission() {
     const res = await fetch(`${API}/api/mission`, {
       method: "POST",
+      signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mission:
@@ -167,6 +168,7 @@ function App() {
   async function callTrends(plan) {
     const res = await fetch(`${API}/api/trends`, {
       method: "POST",
+      signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mission: missionText,
@@ -186,6 +188,7 @@ function App() {
   async function callClean(product) {
     const res = await fetch(`${API}/api/clean`, {
       method: "POST",
+      signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(product),
     });
@@ -198,6 +201,7 @@ function App() {
   async function callScore() {
     const res = await fetch(`${API}/api/supplier-score`, {
       method: "POST",
+      signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ suppliers: supplierData.suppliers }),
     });
@@ -210,6 +214,7 @@ function App() {
   async function callDraft(form) {
     const res = await fetch(`${API}/api/draft`, {
       method: "POST",
+      signal: AbortSignal.timeout(45000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     });
@@ -234,6 +239,7 @@ function App() {
   async function searchCj(keyword) {
     const res = await fetch(
       `${API}/api/cj?keyword=${encodeURIComponent(keyword || "coffee")}`,
+      { signal: AbortSignal.timeout(30000) },
     );
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || "CJ error");
@@ -272,6 +278,12 @@ function App() {
           : draft.reason,
       image:
         form.product && form.product.image ? form.product.image : null,
+      url:
+        form.product && form.product.id
+          ? `https://app.cjdropshipping.com/product-detail.html?id=${encodeURIComponent(
+              form.product.id,
+            )}&from=all&fromType=all&productType=0`
+          : null,
     };
   }
 
@@ -513,7 +525,7 @@ function App() {
       const top = [...result.scores].sort((a, b) => b.score - a.score)[0];
       say(
         "Supplier",
-        `✔ Suppliers scored — best: ${top.supplier} (${top.score}/100). Coffee pick: ${result.coffeeWinner}.`,
+        `✔ Suppliers scored — best overall: ${result.bestSupplier || top.supplier} (${top.score}/100).`,
       );
     } catch (e) {
       say("Supplier", "⚠️ Supplier scoring failed — shift continues without it.");
@@ -542,15 +554,60 @@ function App() {
         ({ p, cost }) =>
           cost !== null && !Number.isNaN(cost) && cost > 0 && p.stock > 0,
       )
-      .filter(({ cost }) => cost * 1.5 <= cap)
-      .slice(0, maxDrafts);
+      .filter(({ cost }) => cost * 1.5 <= cap);
+
+    // Mission-match filter: a cheap product that has nothing to do with
+    // tonight's mission must NOT become a draft (the owner caught coffee
+    // beans and a tea cup inside a baby-toy mission). A product matches
+    // when its name/category shares enough words with the mission
+    // keyword or one of tonight's trend-pick terms.
+    const matchPhrases = [
+      missionPlan.keyword,
+      ...trendPicks.map((t) => t.term),
+    ].filter(Boolean);
+    const sampleMatches = (p) => {
+      const text =
+        `${p.name} ${p.category || ""} ${p.description || ""}`.toLowerCase();
+      return matchPhrases.some((phrase) => {
+        const tokens = String(phrase)
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((w) => w.length > 2);
+        if (tokens.length === 0) return false;
+        const hits = tokens.filter((t) => text.includes(t)).length;
+        return tokens.length <= 1 ? hits === 1 : hits >= 2;
+      });
+    };
+    const matchedEligible = eligible.filter(({ p }) => sampleMatches(p));
+    const skippedOffMission = eligible.length - matchedEligible.length;
+    if (skippedOffMission > 0) {
+      say(
+        "Draft",
+        `Mission-match filter: skipped ${skippedOffMission} product${
+          skippedOffMission === 1 ? "" : "s"
+        } that fit the price but do not match tonight's mission.`,
+      );
+    }
+    if (matchedEligible.length === 0 && eligible.length > 0) {
+      say(
+        "Draft",
+        "No sample-supplier products match tonight's mission — only LIVE supplier drafts will be prepared.",
+      );
+    }
+    if (eligible.length === 0) {
+      say(
+        "Draft",
+        "No sample-supplier products are cheap enough for this mission's price cap.",
+      );
+    }
+    const draftPicks = matchedEligible.slice(0, maxDrafts);
 
     say(
       "Draft",
       `Preparing up to ${maxDrafts} listing drafts from the eligible products…`,
     );
     let drafted = 0;
-    for (const { p, cost } of eligible) {
+    for (const { p, cost } of draftPicks) {
       if (stopped()) break;
       const form = {
         name: p.name,
@@ -571,12 +628,73 @@ function App() {
       }
     }
 
-    // Draft from the LIVE CJ products too — automatically, no clicking
-    const cjEligible = cjFound
+    // Draft from the LIVE CJ products too — automatically, no clicking.
+    // The limit follows the owner's plan (max 6), not a hidden cap of 2.
+    const cjLimit = Math.min(missionPlan.maxProducts || 2, 6);
+    // Audience check: a men's mission must not draft women's products
+    // (and the other way round) — trend-word matching alone cannot see it.
+    const missionAudienceText =
+      `${missionText} ${missionPlan.focus || ""}`.toLowerCase();
+    const wantMen = /\bmen\b|\bmen's\b|\bmale\b/.test(missionAudienceText);
+    const wantWomen =
+      /\bwomen\b|\bwomen's\b|\bladies\b|\bfemale\b/.test(missionAudienceText);
+    let audienceSkipped = 0;
+    const audienceOk = (name) => {
+      const n = (name || "").toLowerCase();
+      const isWomen = /\bwomen\b|\bwomen's\b|\bladies\b|\bfemale\b/.test(n);
+      const isMen = /\bmen\b|\bmen's\b|\bmale\b/.test(n);
+      if (wantMen && isWomen && !isMen) return false;
+      if (wantWomen && isMen && !isWomen) return false;
+      return true;
+    };
+    let cjOverCap = 0;
+    const cjPriced = cjFound
       .map((p) => ({ p, cost: cjPriceYen(p) }))
       .filter(({ cost }) => cost && cost > 0)
-      .filter(({ cost }) => cost * 1.5 <= cap)
-      .slice(0, 2);
+      .filter(({ cost }) => {
+        if (cost * 1.5 <= cap) return true;
+        cjOverCap++;
+        return false;
+      })
+      .filter(({ p }) => {
+        if (audienceOk(p.name)) return true;
+        audienceSkipped++;
+        return false;
+      });
+    if (audienceSkipped > 0) {
+      say(
+        "Draft",
+        `Audience filter: skipped ${audienceSkipped} CJ product${
+          audienceSkipped === 1 ? "" : "s"
+        } that do not match this mission's audience.`,
+      );
+    }
+    // Variety: take one product per trend pick first, then fill the rest,
+    // so one hot pick (e.g. winter hats) cannot fill the whole queue.
+    const byTerm = new Map();
+    for (const item of cjPriced) {
+      const k = item.p.trendTerm || "";
+      if (!byTerm.has(k)) byTerm.set(k, []);
+      byTerm.get(k).push(item);
+    }
+    const cjOrdered = [];
+    let roundAdded = true;
+    while (roundAdded) {
+      roundAdded = false;
+      for (const arr of byTerm.values()) {
+        if (arr.length > 0) {
+          cjOrdered.push(arr.shift());
+          roundAdded = true;
+        }
+      }
+    }
+    const cjEligible = cjOrdered.slice(0, cjLimit);
+    if (cjFound.length > 0 && cjEligible.length === 0) {
+      say(
+        "Draft",
+        `No CJ drafts this time — the collected LIVE products did not pass the filters (${cjOverCap} over the price cap, ${audienceSkipped} wrong audience). A higher cap or a cheaper product type will fix it.`,
+      );
+    }
     if (cjEligible.length > 0) {
       say(
         "Draft",
@@ -1036,7 +1154,7 @@ function App() {
           </p>
         )}
 
-        <h3>🏆 Supplier Score <span className="dim">(data SAMPLE · scoring LIVE)</span></h3>
+        <h3>🏆 Supplier Score <span className="dim">(saved supplier list · SAMPLE data · scoring LIVE)</span></h3>
         <button
           className="primary"
           onClick={scoreSuppliers}
@@ -1059,43 +1177,18 @@ function App() {
             ))}
             <div className="clean-result score-box">
               <p>
-                ☕ <strong>Coffee pick: {scoreResult.coffeeWinner}</strong> —{" "}
-                {scoreResult.coffeeReason}
+                🏅{" "}
+                <strong>
+                  Best overall:{" "}
+                  {scoreResult.bestSupplier || scoreResult.coffeeWinner}
+                </strong>{" "}
+                — {scoreResult.bestReason || scoreResult.coffeeReason}
               </p>
               <p className="dim">🤖 {scoreResult.recommendation}</p>
             </div>
           </div>
         )}
 
-        <h3>✨ Test a Draft <span className="dim">(manual — the shift also does this alone)</span></h3>
-        <div className="ai-form">
-          <input
-            value={aiForm.name}
-            onChange={(e) => setAiForm({ ...aiForm, name: e.target.value })}
-            placeholder="Product name"
-          />
-          <input
-            type="number"
-            value={aiForm.cost}
-            onChange={(e) => setAiForm({ ...aiForm, cost: e.target.value })}
-            placeholder="Cost (yen)"
-          />
-          <input
-            value={aiForm.competitor}
-            onChange={(e) =>
-              setAiForm({ ...aiForm, competitor: e.target.value })
-            }
-            placeholder="Competitor prices"
-          />
-          <button
-            className="primary"
-            onClick={generateDraft}
-            disabled={aiLoading}
-          >
-            {aiLoading ? "Thinking..." : "✨ Generate Draft"}
-          </button>
-        </div>
-        {aiError && <p className="ai-error">{aiError}</p>}
       </section>
       )}
 
@@ -1129,6 +1222,20 @@ function App() {
                   loading="lazy"
                 />
               )}
+              {!item.image && item.url && (
+                <div className="no-photo">
+                  🖼️ No photo from the supplier —{" "}
+                  <a
+                    className="cj-link"
+                    href={item.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    open this exact product on CJ ↗
+                  </a>{" "}
+                  before you decide.
+                </div>
+              )}
               <div className="queue-title">
                 {item.emoji} {item.name}
               </div>
@@ -1151,6 +1258,18 @@ function App() {
                   {item.signal}
                 </span>
                 <p className="reason">💡 {item.reason}</p>
+                {item.url && (
+                  <p className="reason">
+                    <a
+                      className="cj-link"
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      🔗 Open this product on CJ ↗
+                    </a>
+                  </p>
+                )}
               </div>
             </div>
             <div className="queue-actions">{renderActions(item)}</div>

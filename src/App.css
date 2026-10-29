@@ -516,3 +516,34 @@ button.tab.active {
   border-radius: 10px;
   margin: 8px 0;
 }
+
+.queue-img {
+  width: 100%;
+  max-width: 230px;
+  height: 150px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  margin-bottom: 8px;
+  display: block;
+}
+
+.cj-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.cj-link:hover {
+  text-decoration: underline;
+}
+
+.no-photo {
+  border: 1px dashed #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 14px;
+}
